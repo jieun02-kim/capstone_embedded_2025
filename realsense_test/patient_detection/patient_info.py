@@ -1,6 +1,45 @@
 import math
 
-# 외부에서 받아오는 real distance도 받아와야 함....
+import mysql.connector
+
+cnx = mysql.connector.connect(user='jieun', password='password',
+                              host='192.168.120.233',
+                              database='hospital')
+cnx.close()
+
+
+
+"""
+# 추후 에러 예외사항 검증용으로 추가할지도
+import mysql.connector
+from mysql.connector import errorcode
+
+try:
+  cnx = mysql.connector.connect(user='scott',
+                                database='employ')
+except mysql.connector.Error as err:
+  if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+    print("Something is wrong with your user name or password")
+  elif err.errno == errorcode.ER_BAD_DB_ERROR:
+    print("Database does not exist")
+  else:
+    print(err)
+else:
+  cnx.close()
+
+"""
+
+"""
+import logging
+로깅도 추가사항이므로 추후 구현 시 덧붙일 것
+
+"""
+
+
+
+#=====================================================================
+
+# real distance도 받아와야 함....
 
 IV_HEIGHT = 173
 P_HEIGHT = None
@@ -21,7 +60,15 @@ def calculate_range(id: str, Depth: float):
         return REAL_DISTANCE
 
         
-def add_patient():
+def add_patient():      # 환자 추가 메서드
+
+    query = ("SELECT marker_id , first_name, last_name, height, is_warning_patient FROM patient "
+         "WHERE marker_id = %s")
+
+
+
+    """
+    
     pid = input("환자 ID: ").strip()
     if pid in patients:
         print(f"ID {pid} 는 이미 존재합니다.\n")
@@ -46,6 +93,8 @@ def add_patient():
         "is_warning_patient": is_warning
     }
     print(f"환자 {pid} 저장 완료\n")
+
+    """
 
 
 
@@ -100,7 +149,19 @@ patients = {
 
 current_patient_id = None
 
+
+
+
+
+
+
+
+
+
+
 # ----- CLI 진입점 (임포트 시 실행되면 안 됨!) -----
+
+
 def run_cli():
     while True:
         print("=== 환자 관리 프로그램 ===")
@@ -118,6 +179,9 @@ def run_cli():
             break
         else:
             print("잘못된 입력입니다.\n")
+
+
+
 
 # 임포트 시에는 실행 안 되고 파일 직접 실행할 때만 메뉴가 뜨도록
 if __name__ == "__main__":
