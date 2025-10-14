@@ -226,8 +226,9 @@ def main():
                         if USE_DEPTH and depth_f:
                             d = depth_f.get_distance(int(cxy[0]), int(cxy[1]))
                             if d > 0: dist_str = f" | {d:.2f}m"
-                        cv2.putText(img, f"ArUco:{mid}{dist_str}", (pts[0,0], pts[0,1]-6),
+                        cv2.putText(img, f"ArUco : {mid}{dist_str}", (pts[0,0]+30, pts[0,1]-6),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,255), 2)
+                        
                         cv2.circle(img, tuple(cxy), 4, (0,255,255), -1)
 
 
@@ -236,9 +237,14 @@ def main():
                         real_dist = info.calculate_range(str(mid), depth)
 
                         dep = real_dist
-                        cv2.putText(img, f"REAL_DISTANCE={dep:.2f} cm",
-                                    (pts[0,0], pts[0,1]+20),
+                        cv2.putText(img, f"REAL_DISTANCE = {dep:.2f} cm",
+                                    (pts[0,0]+30, pts[0,1]+20),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2)
+                        
+                        # myname
+                        myname = info.myname_is(str(mid))
+                        cv2.putText(img, f"Name : {myname}", (pts[0,0]+30, pts[0,1]-26),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
 
                                     
 

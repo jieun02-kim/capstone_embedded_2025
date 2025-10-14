@@ -1,12 +1,16 @@
 import math
-
 import mysql.connector
 
-cnx = mysql.connector.connect(user='jieun', password='password',
-                              host='192.168.120.233',
-                              database='hospital')
-cnx.close()
+from mysql.connector.pooling import MySQLConnectionPool
 
+
+"""
+mysql.connector.connect(
+    user='jieun', password='1234', database='hospital',
+    unix_socket='/var/run/mysqld/mysqld.sock', connection_timeout=5
+)
+
+"""
 
 
 """
@@ -38,37 +42,93 @@ import logging
 
 
 #=====================================================================
-
-# real distance도 받아와야 함....
-
 IV_HEIGHT = 173
-P_HEIGHT = None
 GAP = 47.5
-REAL_DISTANCE = 0.0
+_last_distance: float | None = None
+
+query = ("SELECT height, first_name, last_name FROM patient WHERE marker_id = %s")
+pool = MySQLConnectionPool(
+                              pool_name="main", pool_size=5,
+                              user='jieun', password='1234',
+                              host='127.0.0.1',
+                              database='hospital',
+                              connection_timeout=5)
 
 
-def calculate_range(id: str, Depth: float):
-    global REAL_DISTANCE
-    # 근데 뎁스 어떤 주기로 받아와야 할지 생각 못함
 
-    if id is None:
+
+def calculate_range(marker_id: str, Depth: float)-> float | None:
+    global _last_distance
+    id = marker_id.strip()
+
+    if not id:
         return 0
-    else:
-        P_HEIGHT = patients[id]["height"]
-        pow_range = pow(Depth,2)-pow(IV_HEIGHT-P_HEIGHT+GAP, 2)
-        REAL_DISTANCE = math.sqrt(pow_range)
-        return REAL_DISTANCE
+
+    cnx = None
+    cursor = None
+
+    if id:
+        try:
+            cnx = pool.get_connection()
+            cursor = cnx.cursor(dictionary=True)
+            cursor.execute(query, (id,))
+            
+            row = cursor.fetchone()
+            if not row:
+                    print(f"[MISS] No patient row for marker_id={id!r}")
+                    return _last_distance
+            if row["height"] is None:
+                    print(f"[MISS] height is NULL for marker_id={id!r}")
+                    return _last_distance
+
+
+            P_HEIGHT = float(row["height"])
+            pow_range = pow(Depth,2)-pow(IV_HEIGHT-P_HEIGHT+GAP, 2)
+            if pow_range<0:
+                return _last_distance
+            REAL_DISTANCE = math.sqrt(pow_range)
+            _last_distance = REAL_DISTANCE
 
         
-def add_patient():      # 환자 추가 메서드
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            finally:
+                if cnx:
+                    cnx.close()
 
-    query = ("SELECT marker_id , first_name, last_name, height, is_warning_patient FROM patient "
-         "WHERE marker_id = %s")
-
-
-
-    """
+    else:
+        return _last_distance
     
+    return REAL_DISTANCE
+
+def myname_is(marker_id: str)-> str | None:
+    id = marker_id.strip()
+    cnx = pool.get_connection()
+    cursor = cnx.cursor(dictionary=True)
+    cursor.execute(query, (id,))
+            
+    row = cursor.fetchone()
+
+    if not row:
+        print(f"[MISS] No patient row for marker_id={id!r}")
+        return "whoami"
+
+    try:
+        if cursor:
+            cursor.close()
+    finally:
+        if cnx:
+            cnx.close()
+
+    final_name = f"{row['first_name'].strip()} {row['last_name'].strip()}"
+
+    
+    return final_name or "whoami"
+
+def add_patient():      # 환자 추가 메서드
+    """    
     pid = input("환자 ID: ").strip()
     if pid in patients:
         print(f"ID {pid} 는 이미 존재합니다.\n")
@@ -133,7 +193,7 @@ def list_patients():
     print()
 
 
-
+"""
 patients = {
     "1" : {
         "marker_id" : "1",
@@ -146,15 +206,8 @@ patients = {
         "is_warning_patient" : False
     }
 }
-
+"""
 current_patient_id = None
-
-
-
-
-
-
-
 
 
 
