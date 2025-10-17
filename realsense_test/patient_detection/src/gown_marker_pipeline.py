@@ -1,3 +1,5 @@
+# gown_marker_pipeline.py
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -242,7 +244,7 @@ def main():
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2)
                         
                         # myname
-                        myname = info.myname_is(str(mid))
+                        p_info, myname = info.get_patient_info(str(mid))
                         cv2.putText(img, f"Name : {myname}", (pts[0,0]+30, pts[0,1]-26),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
 

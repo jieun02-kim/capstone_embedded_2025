@@ -1,16 +1,8 @@
+# patient_info.py
+
 import math
 import mysql.connector
-
 from mysql.connector.pooling import MySQLConnectionPool
-
-
-"""
-mysql.connector.connect(
-    user='jieun', password='1234', database='hospital',
-    unix_socket='/var/run/mysqld/mysqld.sock', connection_timeout=5
-)
-
-"""
 
 
 """
@@ -32,7 +24,6 @@ else:
   cnx.close()
 
 """
-
 """
 import logging
 로깅도 추가사항이므로 추후 구현 시 덧붙일 것
@@ -40,19 +31,42 @@ import logging
 """
 
 
+"""
+mysql.connector.connect(
+    user='jieun', password='1234', database='hospital',
+    unix_socket='/var/run/mysqld/mysqld.sock', connection_timeout=5
+)
 
+"""
+
+
+
+#=====================================================================
+# pool connection
+#=====================================================================
+pool = MySQLConnectionPool(
+                                  pool_name="main", pool_size=5,
+                                  user='jieun', password='1234',
+                                  host='127.0.0.1',
+                                  database='hospital',
+                                  connection_timeout=5)
+
+
+#=====================================================================
+# 변수선언 및 query 구현
 #=====================================================================
 IV_HEIGHT = 173
 GAP = 47.5
 _last_distance: float | None = None
 
-query = ("SELECT height, first_name, last_name FROM patient WHERE marker_id = %s")
-pool = MySQLConnectionPool(
-                              pool_name="main", pool_size=5,
-                              user='jieun', password='1234',
-                              host='127.0.0.1',
-                              database='hospital',
-                              connection_timeout=5)
+query = ("SELECT marker_id, first_name, last_name, sex, blood, height, weight, is_warning_patient FROM patient WHERE marker_id = %s")
+# marker_id, first_name, last_name, sex, blood, height, weight, is_warning_patient
+
+def get_pool_connection():
+    
+    cnx = pool.get_connection()
+    cursor = cnx.cursor(dictionary=True)
+    return cursor, cnx
 
 
 
@@ -69,11 +83,10 @@ def calculate_range(marker_id: str, Depth: float)-> float | None:
 
     if id:
         try:
-            cnx = pool.get_connection()
-            cursor = cnx.cursor(dictionary=True)
+            cursor, cnx = get_pool_connection()
             cursor.execute(query, (id,))
-            
             row = cursor.fetchone()
+
             if not row:
                     print(f"[MISS] No patient row for marker_id={id!r}")
                     return _last_distance
@@ -81,10 +94,10 @@ def calculate_range(marker_id: str, Depth: float)-> float | None:
                     print(f"[MISS] height is NULL for marker_id={id!r}")
                     return _last_distance
 
-
+            # 계산
             P_HEIGHT = float(row["height"])
             pow_range = pow(Depth,2)-pow(IV_HEIGHT-P_HEIGHT+GAP, 2)
-            if pow_range<0:
+            if pow_range < 0:
                 return _last_distance
             REAL_DISTANCE = math.sqrt(pow_range)
             _last_distance = REAL_DISTANCE
@@ -103,17 +116,17 @@ def calculate_range(marker_id: str, Depth: float)-> float | None:
     
     return REAL_DISTANCE
 
-def myname_is(marker_id: str)-> str | None:
+def get_patient_info(marker_id: str)-> str | None:
     id = marker_id.strip()
     cnx = pool.get_connection()
     cursor = cnx.cursor(dictionary=True)
     cursor.execute(query, (id,))
-            
+    
     row = cursor.fetchone()
 
     if not row:
         print(f"[MISS] No patient row for marker_id={id!r}")
-        return "whoami"
+        return NULL
 
     try:
         if cursor:
@@ -123,41 +136,39 @@ def myname_is(marker_id: str)-> str | None:
             cnx.close()
 
     final_name = f"{row['first_name'].strip()} {row['last_name'].strip()}"
+      
+    row.pop('first_name', None)
+    row.pop('last_name', None)
 
+    row = {'final_name': final_name, **row}
+
+
+    return row
+
+def add_patient(marker_id_add_patient: str):      # 환자 추가 메서드
     
-    return final_name or "whoami"
 
-def add_patient():      # 환자 추가 메서드
-    """    
-    pid = input("환자 ID: ").strip()
-    if pid in patients:
-        print(f"ID {pid} 는 이미 존재합니다.\n")
-        return
+    p_info, row = get_patient_info(marker_id_add_patient)
+    return p_info
+ 
+def load_patient_list():
+    """모든 환자의 ID와 이름만 불러오기"""
+    cnx = pool.get_connection()
+    cursor = cnx.cursor(dictionary=True)
+    cursor.execute("SELECT marker_id, first_name, last_name FROM patient ORDER BY marker_id ASC")
+    rows = cursor.fetchall()
 
-    first_name = input("이름(First name): ").strip()
-    last_name = input("성(Last name): ").strip()
-    sex = input("성별(M/F): ").strip().upper() == "M"
-    blood = input("혈액형: ").strip()
-    height = float(input("키(cm): ").strip())
-    weight = float(input("체중(kg): ").strip())
-    is_warning = input("경고 환자입니까? (Y/N): ").strip().upper() == "Y"
+    cursor.close()
+    cnx.close()
 
-    patients[pid] = {
-        "marker_id": pid,
-        "first_name": first_name,
-        "last_name": last_name,
-        "sex": sex,
-        "blood": blood,
-        "height": height,
-        "weight": weight,
-        "is_warning_patient": is_warning
-    }
-    print(f"환자 {pid} 저장 완료\n")
-
-    """
-
-
-
+    result = []
+    for r in rows:
+        full_name = f"{r['first_name'].strip()} {r['last_name'].strip()}"
+        result.append({
+            "marker_id": r["marker_id"],
+            "final_name": full_name
+        })
+    return result
 
 def list_patients():
     # 전역 변수 읽기(표시용)
@@ -193,6 +204,8 @@ def list_patients():
     print()
 
 
+
+# 안쓰긴 하는데 항목 보려고 살려놓은 것
 """
 patients = {
     "1" : {
@@ -213,8 +226,6 @@ current_patient_id = None
 
 
 # ----- CLI 진입점 (임포트 시 실행되면 안 됨!) -----
-
-
 def run_cli():
     while True:
         print("=== 환자 관리 프로그램 ===")
@@ -232,9 +243,6 @@ def run_cli():
             break
         else:
             print("잘못된 입력입니다.\n")
-
-
-
 
 # 임포트 시에는 실행 안 되고 파일 직접 실행할 때만 메뉴가 뜨도록
 if __name__ == "__main__":
