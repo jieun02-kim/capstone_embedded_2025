@@ -203,24 +203,20 @@ def list_patients():
         print(f"{pid:<5}{mark} {name:<20}{sex:<6}{blood:<7}{height:>8.0f}{weight:>9.1f}{warn:>7}")
     print()
 
-
-
-# 안쓰긴 하는데 항목 보려고 살려놓은 것
-"""
-patients = {
-    "1" : {
-        "marker_id" : "1",
-        "first_name" : "jieun",
-        "last_name" : "kim",
-        "sex" : False,
-        "blood": "A+",     
-        "height" : 152,
-        "weight" : 123.123,
-        "is_warning_patient" : False
-    }
-}
-"""
 current_patient_id = None
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
