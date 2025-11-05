@@ -5,7 +5,6 @@ import numpy as np
 import pyrealsense2 as rs
 import signal, time
 from ultralytics import YOLO
-
 import torch
 from torchvision import models, transforms
 import cv2, numpy as np
@@ -22,6 +21,34 @@ import patient_info as info
 from collections import deque
 import time
 fps_history = deque(maxlen=10)
+
+
+# ====== ROS2 연동 추가 ======
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import PointStamped
+import math
+
+class PatientPublisher(Node):
+    def __init__(self):
+        super().__init__('patient_publisher')
+        self.pub = self.create_publisher(PointStamped, '/patient_polar', 10)
+
+    def publish_patient(self, distance_m: float, pixel_x: float, frame_width: int):
+        # 중심 기준으로 각도 계산 (픽셀 → rad)
+        fov_deg = 69.4  # Realsense D435 수평 FOV
+        fov_rad = math.radians(fov_deg)
+        # 픽셀 위치를 기준으로 방위각 계산
+        bearing = (pixel_x - frame_width / 2) / (frame_width / 2) * (fov_rad / 2)
+
+        msg = PointStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'base_link'
+        msg.point.x = float(distance_m)
+        msg.point.y = float(bearing)
+        msg.point.z = 0.0
+        self.pub.publish(msg)
+# =============================
 
 
 # 전처리 정의
@@ -162,6 +189,9 @@ def main():
     profile = pipe.start(cfg)
 
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
+
+    rclpy.init()
+    ros_node = PatientPublisher()
 
     try:
         while not stop:
@@ -311,14 +341,30 @@ def main():
                     cv2.circle(img, tuple(cxy), 4, (0,255,255), -1)
 
 
-                    #is it ok???????????
+                    # #is it ok???????????
+                    # depth = d * 100
+                    # real_dist = info.calculate_range(str(mid), depth)
+                    #     # 안전 포맷 처리
+                    # if real_dist is None:
+                    #     dist_text = "REAL_DISTANCE = N/A"
+                    # else:
+                    #     dist_text = f"REAL_DISTANCE = {real_dist:.2f} cm"
+
+                    # ===== 기존 ArUco 루프 안에서 =====
                     depth = d * 100
                     real_dist = info.calculate_range(str(mid), depth)
-                        # 안전 포맷 처리
-                    if real_dist is None:
-                        dist_text = "REAL_DISTANCE = N/A"
-                    else:
-                        dist_text = f"REAL_DISTANCE = {real_dist:.2f} cm"
+
+                    # 단위 m 로 변환
+                    if real_dist:
+                        distance_m = real_dist / 100.0
+                        bearing_px = cxy[0]
+
+                        # ROS2 토픽으로 퍼블리시
+                        ros_node.publish_patient(distance_m, bearing_px, W)
+                    # ================================
+
+
+
 
                     cv2.putText(img, dist_text, (pts[0,0]+30, pts[0,1]+20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2)
@@ -333,7 +379,8 @@ def main():
                         myname = patient_data.get("final_name", "Unknown")
                     cv2.putText(img, f"Name : {myname}", (pts[0,0]+30, pts[0,1]-26),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
-
+            
+            rclpy.spin_once(ros_node, timeout_sec=0.0)
                                 
             # 🔹 FPS 계산 및 표시 (imshow 직전)
             end_time = time.time()
@@ -358,6 +405,8 @@ def main():
     finally:
         pipe.stop()
         cv2.destroyAllWindows()
+        ros_node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
