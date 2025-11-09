@@ -12,7 +12,7 @@ from torchvision import models, transforms
 import cv2, numpy as np
 
 # 추가
-from groundingdino.util.inference import load_model, predict
+#from groundingdino.util.inference import load_model, predict
 import torchvision.transforms as T
 
 
