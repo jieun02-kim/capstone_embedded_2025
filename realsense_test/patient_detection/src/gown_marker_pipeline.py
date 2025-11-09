@@ -5,6 +5,7 @@ import numpy as np
 import pyrealsense2 as rs
 import signal, time
 from ultralytics import YOLO
+import math
 
 import torch
 from torchvision import models, transforms
@@ -16,6 +17,7 @@ import torchvision.transforms as T
 
 
 import patient_info as info
+
 
 
 # FPS 측정용
@@ -138,18 +140,67 @@ def draw_poly(img, pts, color=(0,255,0), thickness=2):
     if pts is not None and len(pts) >= 4:
         cv2.polylines(img, [pts], True, color, thickness)
 
+
+#============각도 계산, x, y 거리 계산==========
+
+def calculate_theta(cxy_x : int) -> str:
+    frame_width = 640 # 640중 중간 픽셀
+    fov_deg = 69.4
+    fov_rad = math.radians(fov_deg)
+
+    # 중심 대비 상대 위치 비율 (-1.0 ~ +1.0)
+    rel = (cxy_x-frame_width/2) / (frame_width / 2)
+
+    # 좌우 각도 (radian)
+    theta_rad = rel * (fov_rad / 2)
+    return theta_rad
+#  # 문자열로 변환해서 반환
+
+
+def calculate_vector(cxy_x, real_dist):
+    theta_rad = calculate_theta(cxy_x)
+    # real_dist의 x, y성분
+    dx = math.cos(theta_rad)*real_dist
+    dy = math.sin(theta_rad)*real_dist
+    # 1m의 x, y성분
+    dx_1m = math.cos(theta_rad)*1.00
+    dy_1m = math.sin(theta_rad)*1.00
+    return dx, dy, dx_1m, dy_1m
+
+def Artificial_Potention_Field(cxy_x, real_dist, k_att=1.0, stop_dist=1.0):
+    # 근데 이거 일단 attractive force만, 아직 replusive 는 구현 안함
+    dx, dy, dx_1m, dy_1m = calculate_vector(cxy_x, real_dist)
+    dist = math.hypot(dx, dy)
+    delta = dist - stop_dist
+    # Attractive force 계산
+    if delta <= 0:
+        return 0.0, 0.0  # 일정 거리 이내면 멈춤
+    
+    apf_dist = k_att*delta
+    theta = calculate_theta(cxy_x)
+    apf_delta = k_att*theta
+
+    return apf_dist, apf_delta
+
+
+def get_apf_inputs(cxy_x, real_dist_m):
+    # cxy_x, real_dist_m은 현재 계산된 값으로 대체 가능
+    # 일단 테스트용으로 더미 값 리턴
+    return cxy_x, real_dist_m
+
+
 def main():
     global stop
 
     # YOLO 로드 + 워밍업
-    #model = YOLO(YOLO_WEIGHTS)
-    #_ = model.predict(np.zeros((480,640,3), dtype=np.uint8), verbose=False)
+    model = YOLO(YOLO_WEIGHTS)
+    _ = model.predict(np.zeros((480,640,3), dtype=np.uint8), verbose=False)
 
     # ==== GroundingDINO 로드 ====
-    GROUNDDINO_CONFIG = "../../../GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-    GROUNDDINO_WEIGHTS = "../../../GroundingDINO/weights/groundingdino_swint_ogc.pth"
-    g_dino_model = load_model(GROUNDDINO_CONFIG, GROUNDDINO_WEIGHTS)
-    device = next(g_dino_model.parameters()).device
+    # GROUNDDINO_CONFIG = "../../../GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+    # GROUNDDINO_WEIGHTS = "../../../GroundingDINO/weights/groundingdino_swint_ogc.pth"
+    # g_dino_model = load_model(GROUNDDINO_CONFIG, GROUNDDINO_WEIGHTS)
+    # device = next(g_dino_model.parameters()).device
 
 
     # RealSense 파이프라인
@@ -189,62 +240,62 @@ def main():
             # 1) 사람 탐지
 
             
-#            res = model.predict(img, classes=[0], conf=PERSON_CONF, verbose=False)
-#            for r in res:
-#                for b in r.boxes:
-#                    x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
-#                    x1,y1,x2,y2 = clamp_box(x1,y1,x2,y2, W,H)
-#                    cv2.rectangle(img, (x1,y1),(x2,y2), (255,0,0), 2)
+            res = model.predict(img, classes=[0], conf=PERSON_CONF, verbose=False)
+            for r in res:
+                for b in r.boxes:
+                    x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
+                    x1,y1,x2,y2 = clamp_box(x1,y1,x2,y2, W,H)
+                    cv2.rectangle(img, (x1,y1),(x2,y2), (255,0,0), 2)
             # === GroundingDINO (대체) ===
             
             
-            # BGR → RGB → Tensor 변환
-            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            tensor_img = T.ToTensor()(rgb_img).to(device)
+            # # BGR → RGB → Tensor 변환
+            # rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # tensor_img = T.ToTensor()(rgb_img).to(device)
 
 
 
-            # 사람 탐지 수행
-            boxes, logits, phrases = predict(
-                model=g_dino_model,
-                image=tensor_img,
+            # # 사람 탐지 수행
+            # boxes, logits, phrases = predict(
+            #     model=g_dino_model,
+            #     image=tensor_img,
                 
-                caption="a person who is standing",
-                box_threshold=0.35,
-                text_threshold=0.30
-            )
+            #     caption="a person who is standing",
+            #     box_threshold=0.35,
+            #     text_threshold=0.30
+            # )
 
 
             
-            print(f"[DEBUG] Detected boxes: {len(boxes)}")
+            #print(f"[DEBUG] Detected boxes: {len(boxes)}")
 
-            for box in boxes:
-                # GroundingDINO는 (cx, cy, w, h)일 수 있음 → 변환
-                if len(box) == 4:
-                    cx, cy, w, h = box.tolist()
-                    x1 = (cx - w / 2)
-                    y1 = (cy - h / 2)
-                    x2 = (cx + w / 2)
-                    y2 = (cy + h / 2)
-                else:
-                    x1, y1, x2, y2 = box.tolist()
+            # for box in boxes:
+            #     # GroundingDINO는 (cx, cy, w, h)일 수 있음 → 변환
+            #     if len(box) == 4:
+            #         cx, cy, w, h = box.tolist()
+            #         x1 = (cx - w / 2)
+            #         y1 = (cy - h / 2)
+            #         x2 = (cx + w / 2)
+            #         y2 = (cy + h / 2)
+            #     else:
+            #         x1, y1, x2, y2 = box.tolist()
 
-                # 정규화 좌표면 픽셀 단위로 변환
-                if 0 <= x2 <= 1 and 0 <= y2 <= 1:
-                    x1, x2 = x1 * W, x2 * W
-                    y1, y2 = y1 * H, y2 * H
+                # # 정규화 좌표면 픽셀 단위로 변환
+                # if 0 <= x2 <= 1 and 0 <= y2 <= 1:
+                #     x1, x2 = x1 * W, x2 * W
+                #     y1, y2 = y1 * H, y2 * H
 
-                # 정렬 및 클램프
-                x1, x2 = sorted([int(x1), int(x2)])
-                y1, y2 = sorted([int(y1), int(y2)])
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(W, x2), min(H, y2)
+                # # 정렬 및 클램프
+                # x1, x2 = sorted([int(x1), int(x2)])
+                # y1, y2 = sorted([int(y1), int(y2)])
+                # x1, y1 = max(0, x1), max(0, y1)
+                # x2, y2 = min(W, x2), min(H, y2)
 
-                if (x2 - x1) < 10 or (y2 - y1) < 10:
-                    continue
+                # if (x2 - x1) < 10 or (y2 - y1) < 10:
+                #     continue
 
-                print(f"[DEBUG] Corrected box: ({x1},{y1})-({x2},{y2})")
-                cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                # print(f"[DEBUG] Corrected box: ({x1},{y1})-({x2},{y2})")
+                # cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
 
 
@@ -274,26 +325,26 @@ def main():
 
                 det = decode_markers(roi)
 
-                # 3-1) QR 결과
-                for txt, pts in det['qr']:
-                    # 중심 계산
-                    if pts is not None and len(pts) >= 4:
-                        cxy = pts.mean(axis=0).astype(int)
-                        # 원본 좌표로 보정
-                        cp = (int(x1 + cxy[0]/scale_up), int(y1 + cxy[1]/scale_up))
-                        cv2.circle(img, cp, 4, (0,255,0), -1)
-                        draw_poly(img, (pts/scale_up).astype(int) + np.array([x1,y1]))
-                    else:
-                        # 폴리곤이 없으면 ROI 중앙
-                        cp = (int((x1+x2)//2), int((y1+y2)//2))
-                    # 거리 추정
-                    dist_str = ""
-                    if USE_DEPTH and depth_f:
-                        d = depth_f.get_distance(cp[0], cp[1])
-                        if d > 0:
-                            dist_str = f" | {d:.2f}m"
-                    cv2.putText(img, f"QR:{txt}{dist_str}", (x1+5, max(20,y1-10)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
+                # # 3-1) QR 결과
+                # for txt, pts in det['qr']:
+                #     # 중심 계산
+                #     if pts is not None and len(pts) >= 4:
+                #         cxy = pts.mean(axis=0).astype(int)
+                #         # 원본 좌표로 보정
+                #         cp = (int(x1 + cxy[0]/scale_up), int(y1 + cxy[1]/scale_up))
+                #         cv2.circle(img, cp, 4, (0,255,0), -1)
+                #         draw_poly(img, (pts/scale_up).astype(int) + np.array([x1,y1]))
+                #     else:
+                #         # 폴리곤이 없으면 ROI 중앙
+                #         cp = (int((x1+x2)//2), int((y1+y2)//2))
+                #     # 거리 추정
+                #     dist_str = ""
+                #     if USE_DEPTH and depth_f:
+                #         d = depth_f.get_distance(cp[0], cp[1])
+                #         if d > 0:
+                #             dist_str = f" | {d:.2f}m"
+                #     cv2.putText(img, f"QR:{txt}{dist_str}", (x1+5, max(20,y1-10)),
+                #                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
 
                 # 3-2) ArUco 결과
                 for mid, corners in det['aruco']:
@@ -322,6 +373,27 @@ def main():
 
                     cv2.putText(img, dist_text, (pts[0,0]+30, pts[0,1]+20),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2)
+                    
+                    # 각도 계산 printinf
+                    theta = calculate_theta(cxy[0]) 
+                    theta_s = f"{theta:.2f} rad"  # 문자열로 변환
+                    cv2.putText(img, theta_s, (pts[0,0]+30, pts[0,1]+40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,255,255), 2)
+                                        
+ 
+
+                    # --- 인공퍼텐셜필드(APF) 계산 결과 표시 ---
+                    if real_dist is not None:
+                        real_dist_m = real_dist / 100.0  # cm → m 변환
+                        v, theta_rad = Artificial_Potention_Field(cxy[0], real_dist_m)
+
+                        # 속도와 각도 결과 문자열 생성
+                        apf_text = f"APF -> v: {v:.2f}, theta: {math.degrees(theta_rad):.2f}°"
+
+                        # 화면 표시
+                        cv2.putText(img, apf_text, (pts[0,0]+30, pts[0,1]+60),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,255), 2)
+
 
                     
                     # myname
