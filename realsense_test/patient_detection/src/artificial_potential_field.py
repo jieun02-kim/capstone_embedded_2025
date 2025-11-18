@@ -1,17 +1,5 @@
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def Artificial_Potention_Field(start_x,start_y,goal_x,goal_y,obs):
 	x,y = start_x,start_y
 

@@ -1,4 +1,4 @@
-# gown_marker_pipeline.py
+# delivery_detection.py
 
 import cv2
 import numpy as np
@@ -46,7 +46,9 @@ model.eval()
 # ====== 설정 ======
 WIN = "Patient-Gown + Marker (ESC/q)"
 YOLO_WEIGHTS = "yolov8n.pt"     # n/s/m 로 교체 가능 yolov8s.pt(Small), yolov8m.pt(Medium)
+YOLO_DOOR_WEIGHTS = "door_yolov8n.pt"       # 문 탐지 (네가 학습한 pt 파일)
 PERSON_CONF = 0.5       # 최소 신뢰도(confidence) 임계값.
+DOOR_CONF = 0.5
 COLOR_RES = (640, 480)  # (1280, 720) (640, 480)
 FPS = 60
 USE_DEPTH = True        # 거리 추정 원하면 True
@@ -169,8 +171,11 @@ def main():
     global stop
 
     # YOLO 로드 + 워밍업
-    model = YOLO(YOLO_WEIGHTS)
-    _ = model.predict(np.zeros((480,640,3), dtype=np.uint8), verbose=False)
+    person_model = YOLO(YOLO_WEIGHTS)
+    door_model = YOLO(YOLO_DOOR_WEIGHTS)
+    _ = person_model.predict(np.zeros((480,640,3), dtype=np.uint8), verbose=False)
+    _ = door_model.predict(np.zeros((480,640,3), dtype=np.uint8), verbose=False)
+
 
 
     # RealSense 파이프라인
@@ -186,15 +191,13 @@ def main():
 
 
     # post+mid
-    post_mid = Null
-
+    post_mid = 0
+    post_door = 0
 
     try:
         while not stop:
-            # 🔹 FPS 시작 시각
+            # FPS 시작 시각
             start_time = time.time()
-
-
 
             if cv2.getWindowProperty(WIN, cv2.WND_PROP_VISIBLE) < 1:
                 break
@@ -214,6 +217,7 @@ def main():
 
             # 1) 사람 탐지
             res = model.predict(img, classes=[0], conf=PERSON_CONF, verbose=False)
+            
             for r in res:
                 for b in r.boxes:
                     x1, y1, x2, y2 = map(int, b.xyxy[0].tolist())
@@ -273,38 +277,77 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
 
 
-            if post_mid != mid:
-                crop = img[y1:y2, x1:x2]
+        
 
-                # 파일 이름 구성
-                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                base_name = f"patient_{mid}_{ts}"
-                jpg_path = f"detections/{base_name}.jpg"
-                json_path = f"detections/{base_name}.json"
+                if post_mid != mid:
+                    crop = img[y1:y2, x1:x2]
 
-                # 이미지 저장
-                cv2.imwrite(jpg_path, crop)
+                    # 파일 이름 구성
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base_name = f"patient_{mid}_{ts}"
+                    jpg_path = f"detections/{base_name}.jpg"
+                    json_path = f"detections/{base_name}.json"
 
-                # bbox JSON 저장
-                bbox_data = {
-                    f"patient_{mid}": {
-                        "bbox": [float(x1), float(y1), float(x2), float(y2)],
-                        "phrase": "",
-                        "caption": ""
+                    # 이미지 저장
+                    cv2.imwrite(jpg_path, crop)
+
+                    # bbox JSON 저장
+                    bbox_data = {
+                        f"patient_{mid}": {
+                            "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                            "phrase": "",
+                            "caption": ""
+                        }
                     }
-                }
-                with open(json_path, "w", encoding="utf-8") as f:
-                    json.dump(bbox_data, f, ensure_ascii=False, indent=4)
+                    with open(json_path, "w", encoding="utf-8") as f:
+                        json.dump(bbox_data, f, ensure_ascii=False, indent=4)
 
-                print(f"New patient detected (ID={mid}) → Saved {jpg_path}")
+                    print(f"New patient detected (ID={mid}) → Saved {jpg_path}")
 
-                # post_mid 업데이트
-                post_mid = mid
+                    # post_mid 업데이트
+                    post_mid = mid
+                    
+
+            # (2) 문 탐지
+            res_door = door_model.predict(img, conf=DOOR_CONF, verbose=False)
+            for r in res_door:
+                for b in r.boxes:
+                    x1_d, y1_d, x2_d, y2_d = map(int, b.xyxy[0].tolist())
+                    cv2.rectangle(img, (x1_d,y1_d),(x2_d,y2_d), (0,255,255), 2)
+                    label = "Door"
+                    cv2.putText(img, label, (x1_d,y1_d-6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 2)
+
+                if post_door != 1:
+                    #capture save
+                    crop_d = img[y1_d:y2_d, x1_d:x2_d]
+
+                    # 파일 이름 구성
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base_name = f"door_{ts}"
+                    jpg_path = f"detections/{base_name}.jpg"
+                    json_path = f"detections/{base_name}.json"
+
+                    # 이미지 저장
+                    cv2.imwrite(jpg_path, crop_d)
+
+                    # bbox JSON 저장
+                    bbox_data = {
+                        f"patient_{mid}": {
+                            "bbox": [float(x1_d), float(y1_d), float(x2_d), float(y2_d)],
+                            "phrase": "",
+                            "caption": ""
+                        }
+                    }
+                    with open(json_path, "w", encoding="utf-8") as f:
+                        json.dump(bbox_data, f, ensure_ascii=False, indent=4)
+
+                    print(f"New door detected → Saved {jpg_path}")
+                    post_door = 1
 
 
 
 
-            # 🔹 FPS 계산 및 표시 (imshow 직전)
+            # FPS 계산 및 표시 (imshow 직전)
             end_time = time.time()
             frame_time = end_time - start_time
             if frame_time > 0:

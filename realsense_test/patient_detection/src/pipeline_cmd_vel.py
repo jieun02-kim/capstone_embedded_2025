@@ -1,4 +1,4 @@
-# gown_marker_pipeline.py
+# pipeline_cmd_vel.py
 
 import cv2
 import numpy as np
@@ -12,11 +12,16 @@ from torchvision import models, transforms
 import cv2, numpy as np
 
 # 추가
-from groundingdino.util.inference import load_model, predict
+#from groundingdino.util.inference import load_model, predict
 import torchvision.transforms as T
-
-
 import patient_info as info
+
+
+# --- ROS2 추가 ---
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import Twist
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 
 
@@ -24,6 +29,27 @@ import patient_info as info
 from collections import deque
 import time
 fps_history = deque(maxlen=10)
+
+
+# ===============================================================
+#                  ROS2 Node 정의
+# ===============================================================
+class CmdVelPublisher(Node):
+    def __init__(self):
+        super().__init__('gown_apf_publisher')
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', qos)
+
+    def publish_cmd(self, linear, angular):
+        msg = Twist()
+        msg.linear.x = float(max(min(linear, 0.5), -0.5))   # 제한
+        msg.angular.z = float(max(min(angular, 1.0), -1.0))
+        self.publisher_.publish(msg)
+        self.get_logger().info(
+            f"📤 /cmd_vel -> linear.x={msg.linear.x:.3f}, angular.z={msg.angular.z:.3f}"
+        )
+
+
 
 
 # 전처리 정의
@@ -36,10 +62,10 @@ transform = transforms.Compose([
 
 
 # 모델 불러오기
-model = models.mobilenet_v2(pretrained=False) 
-model.classifier[1] = torch.nn.Linear(model.last_channel, 2)
-model.load_state_dict(torch.load("gown_classifier.pth", map_location="cpu"))
-model.eval()
+g_model = models.mobilenet_v2(pretrained=False) 
+g_model.classifier[1] = torch.nn.Linear(g_model.last_channel, 2)
+g_model.load_state_dict(torch.load("gown_classifier.pth", map_location="cpu"))
+g_model.eval()
 
 
 
@@ -72,7 +98,7 @@ def is_patient_gown(crop_bgr: np.ndarray) -> bool:
 
     
     with torch.no_grad():
-        out = model(tensor)
+        out = g_model(tensor)
         pred = torch.argmax(out, 1).item()
     return pred == 0  # 0=gown, 1=normal (ImageFolder 순서 기준) 
 
@@ -167,7 +193,7 @@ def calculate_vector(cxy_x, real_dist):
     dy_1m = math.sin(theta_rad)*1.00
     return dx, dy, dx_1m, dy_1m
 
-def Artificial_Potention_Field(cxy_x, real_dist, k_att=1.0, stop_dist=1.0):
+def Artificial_Potention_Field(cxy_x, real_dist, k_att=3.0, stop_dist=1.0):
     # 근데 이거 일단 attractive force만, 아직 replusive 는 구현 안함
     dx, dy, dx_1m, dy_1m = calculate_vector(cxy_x, real_dist)
     dist = math.hypot(dx, dy)
@@ -180,17 +206,22 @@ def Artificial_Potention_Field(cxy_x, real_dist, k_att=1.0, stop_dist=1.0):
     theta = calculate_theta(cxy_x)
     apf_delta = k_att*theta
 
+    apf_dist = k_att*delta
+    theta = calculate_theta(cxy_x)
+    theta_p = math.pow(abs(theta), 1.5)*(theta/abs(theta))
+    apf_delta = k_att*theta_p
     return apf_dist, apf_delta
 
 
 def get_apf_inputs(cxy_x, real_dist_m):
-    # cxy_x, real_dist_m은 현재 계산된 값으로 대체 가능
-    # 일단 테스트용으로 더미 값 리턴
     return cxy_x, real_dist_m
 
 
 def main():
     global stop
+
+    rclpy.init()                        # --- ROS2 INIT ---
+    node = CmdVelPublisher()            # --- ROS2 Node 생성 ---
 
     # YOLO 로드 + 워밍업
     model = YOLO(YOLO_WEIGHTS)
@@ -238,6 +269,8 @@ def main():
             depth_f = frames.get_depth_frame() if USE_DEPTH else None
 
             # 1) 사람 탐지
+
+
 
             
             res = model.predict(img, classes=[0], conf=PERSON_CONF, verbose=False)
@@ -386,7 +419,9 @@ def main():
                         if real_dist is not None:
                             real_dist_m = real_dist / 100.0  # cm → m 변환
                             v, theta_rad = Artificial_Potention_Field(cxy[0], real_dist_m)
-
+                            
+                            # 🟢 ROS 퍼블리시 추가
+                            node.publish_cmd(v, theta_rad)
                             # 속도와 각도 결과 문자열 생성
                             apf_text = f"APF -> v: {v:.2f}, theta: {math.degrees(theta_rad):.2f}°"
 
@@ -426,9 +461,11 @@ def main():
             k = cv2.waitKey(1) & 0xFF
             if k in (27, ord('q')):
                 break
+            rclpy.spin_once(node, timeout_sec=0)  # ROS 이벤트 처리
 
     finally:
         pipe.stop()
+        rclpy.shutdown()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
