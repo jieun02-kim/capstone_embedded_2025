@@ -15,6 +15,7 @@ import cv2, numpy as np
 #from groundingdino.util.inference import load_model, predict
 import torchvision.transforms as T
 import patient_info as info
+from std_msgs.msg import Float32
 
 
 # --- ROS2 추가 ---
@@ -39,7 +40,7 @@ class CmdVelPublisher(Node):
         super().__init__('gown_apf_publisher')
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         self.publisher_ = self.create_publisher(Twist, '/cmd_vel', qos)
-
+        self.dist_pub = self.create_publisher(Float32, '/evaluation/target_distance', qos)
     def publish_cmd(self, linear, angular):
         msg = Twist()
         msg.linear.x = float(max(min(linear, 0.5), -0.5))   # 제한
@@ -49,7 +50,10 @@ class CmdVelPublisher(Node):
             f"📤 /cmd_vel -> linear.x={msg.linear.x:.3f}, angular.z={msg.angular.z:.3f}"
         )
 
-
+    def publish_distance(self, dist):
+        msg = Float32()
+        msg.data = float(dist)
+        self.dist_pub.publish(msg)
 
 
 # 전처리 정의
@@ -199,18 +203,15 @@ def Artificial_Potention_Field(cxy_x, real_dist, k_att=3.0, stop_dist=1.0):
     dist = math.hypot(dx, dy)
     delta = dist - stop_dist
     # Attractive force 계산
-    if delta <= 0:
-        return 0.0, 0.0  # 일정 거리 이내면 멈춤
-    
     apf_dist = k_att*delta
     theta = calculate_theta(cxy_x)
-    apf_delta = k_att*theta
+    apf_theta = -1*k_att*theta
+    theta_p = abs(apf_theta)
 
-    apf_dist = k_att*delta
-    theta = calculate_theta(cxy_x)
-    theta_p = math.pow(abs(theta), 1.5)*(theta/abs(theta))
-    apf_delta = k_att*theta_p
-    return apf_dist, apf_delta
+    if delta <= 0 and theta_p <=0.3:
+        return 0.0, 0.0
+
+    return apf_dist, apf_theta
 
 
 def get_apf_inputs(cxy_x, real_dist_m):
@@ -398,6 +399,9 @@ def main():
                         #is it ok???????????
                         depth = d * 100
                         real_dist = info.calculate_range(str(mid), depth)
+                        if real_dist is not None:
+                            node.publish_distance(real_dist)
+
                             # 안전 포맷 처리
                         if real_dist is None:
                             dist_text = "REAL_DISTANCE = N/A"

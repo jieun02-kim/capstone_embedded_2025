@@ -1,156 +1,163 @@
+# evaluation_node.py
 import rclpy
 from rclpy.node import Node
+
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
+
 import csv
 import time
 import math
+import matplotlib.pyplot as plt
+
 
 class EvaluationNode(Node):
     def __init__(self):
-        super().__init__('evaluation_node')
+        super().__init__("evaluation_node")
 
-        # ============================
-        # 데이터 로그
-        # ============================
-        self.cmd_log = []
-        self.odom_log = []
-        self.need_dist_log = []
+        # 로그 저장용 리스트
+        self.cmd_log = []          # (t, linear.x, angular.z)
+        self.odom_log = []         # (t, x, y, yaw)
+        self.dist_log = []         # (t, real_dist)
 
-        # 이전 상태 (delta 계산용)
-        self.prev_time_cmd = None
-        self.prev_x = None
-        self.prev_y = None
-
-        # 시작 시각 (30초 타이머)
+        # 시작 시각
         self.start_time = time.time()
 
-        # ============================
-        # ROS 구독 설정
-        # ============================
-        self.create_subscription(Twist, '/cmd_vel', self.cmd_callback, 10)
-        self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.create_subscription(Float32, '/evaluation/target_distance', self.need_dist_callback, 10)
+        # 구독 설정
+        self.create_subscription(Twist, "/cmd_vel", self.cmd_callback, 10)
+        self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
+        self.create_subscription(Float32, "/evaluation/real_dist", self.dist_callback, 10)
 
-        # 타이머 (0.1초마다 체크)
-        self.create_timer(0.1, self.check_timeout)
+        # 타이머 (주기적으로 종료 체크)
+        self.create_timer(0.1, self.check_finish)
 
-        self.get_logger().info("EvaluationNode started. Waiting for data...")
+        self.get_logger().info("EvaluationNode started. Collecting data for 30 seconds...")
 
-    # ============================================================
-    # 1) cmd_vel → Δdistance_cmd
-    # ============================================================
-    def cmd_callback(self, msg):
-        now = time.time()
+    # ================================
+    #   콜백 함수
+    # ================================
+    def cmd_callback(self, msg: Twist):
+        t = time.time() - self.start_time
+        self.cmd_log.append([t, msg.linear.x, msg.angular.z])
 
-        if self.prev_time_cmd is None:
-            self.prev_time_cmd = now
-            return
-
-        dt = now - self.prev_time_cmd
-        d_cmd = msg.linear.x * dt
-
-        self.cmd_log.append({
-            "time": now,
-            "distance_cmd": d_cmd
-        })
-
-        self.prev_time_cmd = now
-
-    # ============================================================
-    # 2) odom → Δdistance_odom
-    # ============================================================
-    def odom_callback(self, msg):
-        now = time.time()
-
+    def odom_callback(self, msg: Odometry):
+        t = time.time() - self.start_time
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
 
-        if self.prev_x is None:
-            self.prev_x = x
-            self.prev_y = y
-            self.get_logger().info("Odom first received.")
+        # quaternion → yaw 변환
+        q = msg.pose.pose.orientation
+        yaw = math.atan2(
+            2.0 * (q.w*q.z + q.x*q.y),
+            1.0 - 2.0 * (q.y*q.y + q.z*q.z)
+        )
+
+        self.odom_log.append([t, x, y, yaw])
+
+    def dist_callback(self, msg: Float32):
+        t = time.time() - self.start_time
+        self.dist_log.append([t, float(msg.data)])
+
+    # ================================
+    #   30초 후 CSV 저장 + 그래프 출력
+    # ================================
+    def check_finish(self):
+        if time.time() - self.start_time < 30.0:
             return
 
-        dx = x - self.prev_x
-        dy = y - self.prev_y
-        d_odom = math.sqrt(dx * dx + dy * dy)
-
-        self.odom_log.append({
-            "time": now,
-            "distance_odom": d_odom
-        })
-
-        self.prev_x = x
-        self.prev_y = y
-
-    # ============================================================
-    # 3) need_dist (실제 pipeline에서 보내는 목표 이동거리)
-    # ============================================================
-    def need_dist_callback(self, msg):
-        now = time.time()
-        self.need_dist_log.append({
-            "time": now,
-            "need_dist": msg.data
-        })
-
-    # ============================================================
-    # 4) 30초 후 자동 종료 및 CSV 저장
-    # ============================================================
-    def check_timeout(self):
-        if time.time() - self.start_time >= 30.0:
-            self.get_logger().info("30s done. Saving CSV...")
-            self.save_csv()
-            self.get_logger().info("Shutting down evaluation_node.")
-            rclpy.shutdown()
-
-    # ============================================================
-    # 5) CSV 저장
-    # ============================================================
-    def save_csv(self):
-        filename = "evaluation_results.csv"
-
-        n = min(len(self.cmd_log), len(self.odom_log), len(self.need_dist_log))
-
-        if n == 0:
-            self.get_logger().warn("No data collected. CSV will not be saved.")
-            return
-
-        with open(filename, "w", newline="") as f:
+        # --------------------------
+        # CSV 저장
+        # --------------------------
+        csv_path = "evaluation_log.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "time",
-                "distance_cmd",
-                "distance_odom",
-                "need_dist",
-                "error_cmd_vs_odom",
-                "error_odom_vs_need"
-            ])
+            writer.writerow(["time", "cmd_linear", "cmd_angular", "odom_x", "odom_y", "odom_yaw", "real_dist"])
 
-            for i in range(n):
-                t = self.cmd_log[i]["time"]
-                d_cmd = self.cmd_log[i]["distance_cmd"]
-                d_odom = self.odom_log[i]["distance_odom"]
-                d_need = self.need_dist_log[i]["need_dist"]
+            # 시간 기준 정렬을 위해 dict 형태 병합
+            max_len = max(len(self.cmd_log), len(self.odom_log), len(self.dist_log))
+            for i in range(max_len):
+                t = None
+                cmd_l = cmd_a = ""
+                ox = oy = oyaw = ""
+                dist = ""
 
-                err1 = d_cmd - d_odom
-                err2 = d_odom - d_need
+                if i < len(self.cmd_log):
+                    t = self.cmd_log[i][0]
+                    cmd_l, cmd_a = self.cmd_log[i][1], self.cmd_log[i][2]
 
-                writer.writerow([t, d_cmd, d_odom, d_need, err1, err2])
+                if i < len(self.odom_log):
+                    ox, oy, oyaw = self.odom_log[i][1], self.odom_log[i][2], self.odom_log[i][3]
 
-        self.get_logger().info(f"CSV saved: {filename}")
+                if i < len(self.dist_log):
+                    dist = self.dist_log[i][1]
+
+                writer.writerow([t, cmd_l, cmd_a, ox, oy, oyaw, dist])
+
+        self.get_logger().info(f"CSV saved: {csv_path}")
+
+        # --------------------------
+        # 그래프 출력
+        # --------------------------
+        self.plot_graph()
+        rclpy.shutdown()
+
+    # ================================
+    #   Plotting
+    # ================================
+    def plot_graph(self):
+        if len(self.cmd_log) == 0:
+            self.get_logger().warning("No data for plotting.")
+            return
+
+        # CMD
+        t_cmd = [c[0] for c in self.cmd_log]
+        lin = [c[1] for c in self.cmd_log]
+        ang = [c[2] for c in self.cmd_log]
+
+        # REAL DIST
+        t_dist = [d[0] for d in self.dist_log]
+        dist = [d[1] for d in self.dist_log]
+
+        # ODOM
+        t_odom = [o[0] for o in self.odom_log]
+        ox = [o[1] for o in self.odom_log]
+        oy = [o[2] for o in self.odom_log]
+
+        # --- Plot ---
+        fig, axs = plt.subplots(3, 1, figsize=(10, 12))
+
+        # 1) cmd_vel
+        axs[0].plot(t_cmd, lin, label="linear.x")
+        axs[0].plot(t_cmd, ang, label="angular.z")
+        axs[0].set_title("cmd_vel")
+        axs[0].set_xlabel("time (sec)")
+        axs[0].legend()
+
+        # 2) odom position
+        axs[1].plot(ox, oy, label="Robot path (odom)")
+        axs[1].set_title("Odometry trajectory")
+        axs[1].set_xlabel("X")
+        axs[1].set_ylabel("Y")
+        axs[1].legend()
+        axs[1].axis("equal")
+
+        # 3) real distance
+        axs[2].plot(t_dist, dist, color="green")
+        axs[2].set_title("Real Distance (from pipeline)")
+        axs[2].set_xlabel("time (sec)")
+        axs[2].set_ylabel("cm")
+
+        plt.tight_layout()
+        plt.show()
 
 
-# ============================================================
-# Main
-# ============================================================
 def main(args=None):
     rclpy.init(args=args)
     node = EvaluationNode()
     rclpy.spin(node)
-    rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+

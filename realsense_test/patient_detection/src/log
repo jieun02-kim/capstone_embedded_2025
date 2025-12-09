@@ -1,0 +1,38 @@
+ivery_decection.py 
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+Traceback (most recent call last):
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 379, in <module>
+    main()
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 221, in main
+    if r.boxes is None or len(r.boxes) == 0:
+UnboundLocalError: local variable 'r' referenced before assignment
+
+
+raimlab@ubuntu:~/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src$ python3 delivery_decection.py 
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+Traceback (most recent call last):
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 379, in <module>
+    main()
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 339, in main
+    f"patient_{mid}": {
+UnboundLocalError: local variable 'mid' referenced before assignment
+
+
+
+tection/src$ python3 delivery_decection.py 
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:208: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/raimlab/.local/lib/python3.10/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=None`.
+  warnings.warn(msg)
+Traceback (most recent call last):
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 381, in <module>
+    main()
+  File "/home/raimlab/capstone_jieun/capstone_embedded_2025/realsense_test/patient_detection/src/delivery_decection.py", line 347, in main
+    with open(json_path, "w", encoding="utf-8") as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'detections/door_20251123_004900.json'
